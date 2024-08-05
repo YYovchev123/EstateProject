@@ -16,7 +16,7 @@ library Errors {
     /// @notice When the deadline has passed
     error DeadlineAlreadyPassed();
     /// @notice When the target fundrasing amount has already been collected
-    error FundrasingTargetAmountAlreadyCollected();
+    error FundrasingTargetAmountAlreadyCollectedOrIsBeingExceeded();
     /// @notice When the deadline has not passed yet
     error DeadlineHasNotPassedYet();
     /// @notice When the target fundrasing amount has not been collected yet
@@ -35,4 +35,10 @@ library Errors {
     error AddressZero();
     /// @notice When the msg.sender is not the owner
     error NotOwner();
+    /// @notice When not all apartments have been sold
+    error NotAllApartmentsAreSold();
+    /// @notice When user has not invested or has already claimed his rewards
+    error NoRewardsToClaim();
+    /// @notice When user has not invested and the targert fundrasing amount has not been met
+    error NoInvestmentMade();
 }

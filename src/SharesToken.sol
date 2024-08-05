@@ -116,4 +116,9 @@ abstract contract SharesToken {
 
         return true;
     }
+
+    /// @notice Returns the current balance of shares tokens for the specified user
+    function balanceOf(address user) public view returns (uint256) {
+        return s_balances[user];
+    }
 }

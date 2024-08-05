@@ -20,20 +20,27 @@ contract EstateProject is SharesToken, Ownable {
         bool isBought;
     }
 
+    /// @notice Constant representing one hundred
+    /// @dev To avoid magic numbers
+    uint256 private constant ONE_HUNDRED = 100;
+
     /// @notice The location of the real estate property
-    string public s_location;
+    string private s_location;
 
     /// @notice The appartments available in the real estate property
-    uint256 public s_appartmentsAvailable;
+    uint256 private s_appartmentsAvailable;
 
     /// @notice The target amount of funds to be fund raised
-    uint256 public s_targetFundrasingAmount;
+    uint256 private s_targetFundrasingAmount;
 
     /// @notice The deadline at which the fundrasing stops
-    uint256 public s_deadline;
+    uint256 private s_deadline;
 
     /// @notice Whether the funds have been withdrawn or not
-    bool public isWithdrawn;
+    bool private _isWithdrawn;
+
+    /// @notice The total amount of funds collected by selling the appartments
+    uint256 private _amountCollectedFromAppartments;
 
     /// @notice Appartment ID => Appartment struct
     mapping(uint256 id => Appartment appartment) s_appartments;
@@ -55,6 +62,16 @@ contract EstateProject is SharesToken, Ownable {
     /// @param to The address to which the funds are withdrawn
     /// @param amount The amount withdrawn
     event WithdrawFunds(address to, uint256 amount);
+
+    /// @notice Emmited when an investor claims his award
+    /// @param investor The address of the investor
+    /// @param rewardAmount The amount of reward the investor receives
+    event AwardDistributed(address investor, uint256 rewardAmount);
+
+    /// @notice Emmited when an investor withdraws investment after an unsuccessful project
+    /// @param investor The address wanting to withdraw invested amount
+    /// @param amount The invested amount being withdrawn
+    event InvestmentRetreived(address investor, uint256 amount);
 
     /// @dev The appartmentsAvailable should be alligned with the appartmentPrices array
     /// @param name  The name of the ShareToken
@@ -83,7 +100,7 @@ contract EstateProject is SharesToken, Ownable {
         s_deadline = deadline;
         s_appartmentsAvailable = appartmentsAvailable;
         s_targetFundrasingAmount = targetFundrasingAmount;
-        isWithdrawn = false;
+        _isWithdrawn = false;
 
         //  Check if this will work properly
         for (uint256 i = 0; i < appartmentsPrices.length; i++) {
@@ -103,14 +120,39 @@ contract EstateProject is SharesToken, Ownable {
     function invest() external payable {
         if (block.timestamp >= s_deadline)
             revert Errors.DeadlineAlreadyPassed();
-        if (isCollected())
-            revert Errors.FundrasingTargetAmountAlreadyCollected();
+        if (getTotalAmountInvested() > s_targetFundrasingAmount)
+            revert Errors
+                .FundrasingTargetAmountAlreadyCollectedOrIsBeingExceeded();
 
         uint256 amount = msg.value;
         s_inverstorToAmount[msg.sender] += amount;
         _mint(msg.sender, amount);
 
         emit Invest(msg.sender, amount);
+    }
+
+    /// @notice Called when a project has not collected the target fundrasing amount and the investor
+    /// wants to withdraw his funds
+    /// @dev The investor needs to provide his ShareTokens in order to receive his invested amount
+    /// @dev Reverts if the deadline has not passed yet
+    /// @dev Reverts if there is not invested amount
+    /// @dev Reverts if the amount wanted is bigger than the amount invested
+    /// @dev Burns the ShareTokens of the investor
+    /// @dev After all the checks have been completed the function transfers the `amount` to the investor
+    function retreiveInvestment(uint256 amount) public {
+        uint256 investedAmount = s_inverstorToAmount[msg.sender];
+        if (block.timestamp < s_deadline)
+            revert Errors.DeadlineHasNotPassedYet();
+        if (investedAmount == 0) revert Errors.NoInvestmentMade();
+        if (amount > investedAmount) revert Errors.AmountExceeds();
+
+        s_inverstorToAmount[msg.sender] -= amount;
+        _burn(msg.sender, amount);
+
+        emit InvestmentRetreived(msg.sender, amount);
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        if (!success) revert Errors.CallNotSuccessful();
     }
 
     /// @notice Called by the owner to withdraw the target funds if they have been collected
@@ -124,11 +166,11 @@ contract EstateProject is SharesToken, Ownable {
         if (block.timestamp < s_deadline)
             revert Errors.DeadlineHasNotPassedYet();
         if (!isCollected()) revert Errors.TargetFundrasingAmountNotCollected();
-        if (to == address(0)) revert AddressZero();
-        if (isWithdrawn) revert Errors.FundsAlreadyWithdrawn();
+        if (to == address(0)) revert Errors.AddressZero();
+        if (_isWithdrawn) revert Errors.FundsAlreadyWithdrawn();
 
-        isWithdrawn = true;
-        uint256 amount = address(this).balance;
+        _isWithdrawn = true;
+        uint256 amount = getTotalAmountInvested();
 
         emit WithdrawFunds(to, amount);
 
@@ -146,15 +188,49 @@ contract EstateProject is SharesToken, Ownable {
         uint256 appartmentId
     ) public payable returns (Appartment memory appartment) {
         appartment = s_appartments[appartmentId];
-        if (!isWithdrawn) revert Errors.FundsNotWithdrawn();
+        if (!_isWithdrawn) revert Errors.FundsNotWithdrawn();
         if (appartment.isBought) revert Errors.AppartmentAlreadyBought();
-        if (appartment.price > msg.value)
+        if (appartment.price != msg.value)
             revert Errors.InsufficientPaymentAmount();
 
         appartment.isBought = true;
         appartment.owner = msg.sender;
 
+        _amountCollectedFromAppartments += msg.value;
+        s_appartmentsAvailable--;
+
         emit AppartmentBought(msg.sender, appartmentId);
+    }
+
+    /// @notice Called by investor when all the appartments have been bought to claim their reward
+    /// @dev Reverts if all the apartments are not sold
+    /// @dev Reverts if the user has nothing to claim
+    /// @dev Reverts if the funds have not been withdrawn (just for safety)
+    /// @dev Calculates the reward and transfers it to the investor
+    /// @return reward Returns the reward amount
+    function distributeRewards() public payable returns (uint256 reward) {
+        uint256 investedAmount = s_inverstorToAmount[msg.sender];
+        if (s_appartmentsAvailable != 0)
+            revert Errors.NotAllApartmentsAreSold();
+        if (investedAmount == 0) revert Errors.NoRewardsToClaim();
+        if (!_isWithdrawn) revert Errors.FundsNotWithdrawn(); // check just for safety
+
+        uint256 targetFundrasingAmount = s_targetFundrasingAmount;
+        uint256 appartmentAmountCollected = _amountCollectedFromAppartments;
+
+        // TODO Check this calculation very carefully
+        /// @dev This implementation of rewards distributes all the funds collected from the appartments
+        /// @dev Might need to change later
+        uint256 percentage = (investedAmount / targetFundrasingAmount) *
+            ONE_HUNDRED;
+        reward = (percentage / ONE_HUNDRED) * appartmentAmountCollected;
+
+        s_inverstorToAmount[msg.sender] = 0;
+
+        emit AwardDistributed(msg.sender, reward);
+
+        (bool success, ) = msg.sender.call{value: reward}("");
+        if (!success) revert Errors.CallNotSuccessful();
     }
 
     /// @notice Gets the totalAmountInvested in the contract while fundrasing
@@ -166,5 +242,30 @@ contract EstateProject is SharesToken, Ownable {
     /// @notice If the funds have been collected the function returns `true`, else `false`
     function isCollected() public view returns (bool) {
         return getTotalAmountInvested() >= s_targetFundrasingAmount;
+    }
+
+    /// @notice Returns the location
+    function getLocation() external view returns (string memory) {
+        return s_location;
+    }
+
+    /// @notice Returns the appartments available
+    function getAppartmentsAvailable() external view returns (uint256) {
+        return s_appartmentsAvailable;
+    }
+
+    /// @notice Returns the target fundrasing amount
+    function getTargetFundrasingAmount() external view returns (uint256) {
+        return s_targetFundrasingAmount;
+    }
+
+    /// @notice Returns the deadline
+    function getDeadline() external view returns (uint256) {
+        return s_deadline;
+    }
+
+    /// @notice Receive function, which for now just reverts, so it does not disturb the rewards distribution
+    receive() external payable {
+        revert();
     }
 }
