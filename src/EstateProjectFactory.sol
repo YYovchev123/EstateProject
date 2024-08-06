@@ -9,7 +9,7 @@ import {EstateProject} from "./EstateProject.sol";
 /// @dev Includes a mapping with all the estate projects - past and present
 contract EstateProjectFactory {
     /// @notice An array of the real estate projects
-    EstateProject[] public estateProjects;
+    EstateProject[] public s_estateProjects;
 
     /// @notice Emitted when a new EstateProject has been created
     /// @param initialOwner The initial owner of the EstateProject
@@ -25,22 +25,27 @@ contract EstateProjectFactory {
         string memory symbol,
         string memory location,
         uint256 deadline,
-        uint256 appartmentsAvailable,
+        uint256 apartmentsAvailable,
         uint256 targetFundrasingAmount,
-        uint256[] memory appartmentPrices
+        uint256[] memory apartmentPrices
     ) public returns (EstateProject estateProject) {
         estateProject = new EstateProject({
             name: name,
             symbol: symbol,
             location: location,
             deadline: deadline,
-            appartmentsAvailable: appartmentsAvailable,
+            apartmentsAvailable: apartmentsAvailable,
             targetFundrasingAmount: targetFundrasingAmount,
-            appartmentsPrices: appartmentPrices
+            apartmentsPrices: apartmentPrices
         });
 
-        estateProjects.push(estateProject);
+        s_estateProjects.push(estateProject);
 
         emit EstateProjectCreated(msg.sender, estateProject);
+    }
+
+    /// @notice Helper function returning the length of the estate projects array
+    function getEstateProjectArrayLength() external view returns (uint256) {
+        return s_estateProjects.length;
     }
 }
