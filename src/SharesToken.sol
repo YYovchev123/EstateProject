@@ -17,11 +17,7 @@ abstract contract SharesToken {
     /// @param owner The address of the owner who allowes the tokens
     /// @param spender The address which is being allowed the tokens
     /// @param amount The amount of tokens being allowed
-    event Approve(
-        address indexed owner,
-        address indexed spender,
-        uint256 amount
-    );
+    event Approve(address indexed owner, address indexed spender, uint256 amount);
 
     /// @notice The name of the share token
     string public s_name;
@@ -99,15 +95,12 @@ abstract contract SharesToken {
     /// @param from The address from which the tokens are being deducted
     /// @param to The address from which the tokens are being transfered
     /// @param amount The amount of tokens to be transfered
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         uint256 allowed = s_allowances[from][msg.sender];
         if (amount > allowed) revert Errors.AmountExceeds();
-        if (allowed != type(uint256).max)
+        if (allowed != type(uint256).max) {
             s_allowances[from][msg.sender] = allowed - amount;
+        }
 
         s_balances[from] -= amount;
         s_balances[to] += amount;
@@ -120,5 +113,10 @@ abstract contract SharesToken {
     /// @notice Returns the current balance of shares tokens for the specified user
     function balanceOf(address user) public view returns (uint256) {
         return s_balances[user];
+    }
+
+    /// @notice Returns the total supply of tokens
+    function totalSupply() public view returns (uint256) {
+        return s_totalSupply;
     }
 }
